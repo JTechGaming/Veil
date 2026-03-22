@@ -559,6 +559,7 @@
   <ItemGroup>
     <ClInclude Include="Benchmark.h" />
     <ClInclude Include="GpuDatabase.hpp" />
+    <ClInclude Include="secrets.h" />
     <ClInclude Include="ShaderLoader.hpp" />
     <ClInclude Include="Telemetry.h" />
     <ClInclude Include="thirdparty\imgui\imconfig.h" />
@@ -580,6 +581,7 @@
     <Content Include="fonts\JetBrainsMono-Medium.ttf" />
     <Content Include="gpu_database.json" />
     <Content Include="compile_shaders.bat" />
+    <Content Include="secrets.h.example" />
     <Content Include="shaders\bandwidth.comp" />
     <Content Include="shaders\bandwidth_comp.spv" />
     <Content Include="shaders\compute.comp" />
