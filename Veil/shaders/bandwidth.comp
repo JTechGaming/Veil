@@ -1,0 +1,16 @@
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) buffer DataBuffer {
+    float data[];
+};
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    uint stride = gl_NumWorkGroups.x * 64;
+
+    for (int i = 0; i < 100; i++) {
+        data[idx + stride] = data[idx] + float(i);
+    }
+}

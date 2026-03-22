@@ -1,8 +1,8 @@
 ﻿#include "GpuDatabase.hpp"
 
 #include <fstream>
-#include "json.hpp"
-#include "fuzz.hpp"
+#include <json.hpp>
+#include <rapidfuzz/fuzz.hpp>
 
 namespace Veil {
     void GpuDatabase::load(const std::string& path) {
@@ -27,7 +27,7 @@ namespace Veil {
     }
 
     int GpuDatabase::findByName(const std::string& name) {
-        std::string normalisedName = name;
+        std::string normalisedName = normaliseGpuName(name);
         std::transform(normalisedName.begin(), normalisedName.end(), normalisedName.begin(),
                    [](unsigned char c){ return std::tolower(c); });
         int bestIndex = 0;
@@ -41,6 +41,15 @@ namespace Veil {
             }
         }
         return bestScore >= FUZZY_THRESHOLD ? bestIndex : -1;
+    }
+
+    std::vector<int> GpuDatabase::getWeakerGpuIndices(int hostIndex) const {
+        std::vector<int> output;
+        output.reserve(m_loadedGpus.size() - hostIndex - 1);
+        for (int i = hostIndex + 1; i < static_cast<int>(m_loadedGpus.size()); i++) {
+            output.emplace_back(i);
+        }
+        return output;
     }
 
     const GpuEntry& GpuDatabase::get(int index) const {

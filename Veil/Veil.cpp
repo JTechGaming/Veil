@@ -7,6 +7,13 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include "Benchmark.h"
+#include "GpuDatabase.hpp"
+#include "VeilConfig.h"
+#include "VeilTheme.h"
+#include "VeilUI.h"
+#include "VulkanDevice.h"
+
 // Volk headers
 #ifdef IMGUI_IMPL_VULKAN_USE_VOLK
 #define VOLK_IMPLEMENTATION
@@ -21,17 +28,20 @@ static uint32_t                 g_QueueFamily = (uint32_t)-1;
 static VkQueue                  g_Queue = VK_NULL_HANDLE;
 static VkPipelineCache          g_PipelineCache = VK_NULL_HANDLE;
 static VkDescriptorPool         g_DescriptorPool = VK_NULL_HANDLE;
+static VulkanDevice vulkanDevice;
+static Veil::VeilUI veilUI;
+static Veil::Benchmark benchmark;
+static std::mutex g_QueueMutex;
 
 static ImGui_ImplVulkanH_Window g_MainWindowData;
 static uint32_t                 g_MinImageCount = 2;
 static bool                     g_SwapChainRebuild = false;
 
-static void glfw_error_callback(int error, const char* description)
-{
+static void glfwErrorCallback(int error, const char* description) {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
-static void check_vk_result(VkResult err)
-{
+
+static void checkVkResult(VkResult err) {
     if (err == VK_SUCCESS)
         return;
     fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
@@ -48,16 +58,14 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_report(VkDebugReportFlagsEXT flags, 
 }
 #endif // APP_USE_VULKAN_DEBUG_REPORT
 
-static bool IsExtensionAvailable(const ImVector<VkExtensionProperties>& properties, const char* extension)
-{
+static bool IsExtensionAvailable(const ImVector<VkExtensionProperties>& properties, const char* extension) {
     for (const VkExtensionProperties& p : properties)
         if (strcmp(p.extensionName, extension) == 0)
             return true;
     return false;
 }
 
-static void SetupVulkan(ImVector<const char*> instance_extensions)
-{
+static void setupVulkan(ImVector<const char*> instance_extensions) {
     VkResult err;
 #ifdef IMGUI_IMPL_VULKAN_USE_VOLK
     volkInitialize();
@@ -74,7 +82,7 @@ static void SetupVulkan(ImVector<const char*> instance_extensions)
         vkEnumerateInstanceExtensionProperties(nullptr, &properties_count, nullptr);
         properties.resize(properties_count);
         err = vkEnumerateInstanceExtensionProperties(nullptr, &properties_count, properties.Data);
-        check_vk_result(err);
+        checkVkResult(err);
 
         // Enable required extensions
         if (IsExtensionAvailable(properties, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
@@ -99,7 +107,7 @@ static void SetupVulkan(ImVector<const char*> instance_extensions)
         create_info.enabledExtensionCount = (uint32_t)instance_extensions.Size;
         create_info.ppEnabledExtensionNames = instance_extensions.Data;
         err = vkCreateInstance(&create_info, g_Allocator, &g_Instance);
-        check_vk_result(err);
+        checkVkResult(err);
 #ifdef IMGUI_IMPL_VULKAN_USE_VOLK
         volkLoadInstance(g_Instance);
 #endif
@@ -114,7 +122,7 @@ static void SetupVulkan(ImVector<const char*> instance_extensions)
         debug_report_ci.pfnCallback = debug_report;
         debug_report_ci.pUserData = nullptr;
         err = f_vkCreateDebugReportCallbackEXT(g_Instance, &debug_report_ci, g_Allocator, &g_DebugReport);
-        check_vk_result(err);
+        checkVkResult(err);
 #endif
     }
 
@@ -155,12 +163,11 @@ static void SetupVulkan(ImVector<const char*> instance_extensions)
         create_info.enabledExtensionCount = (uint32_t)device_extensions.Size;
         create_info.ppEnabledExtensionNames = device_extensions.Data;
         err = vkCreateDevice(g_PhysicalDevice, &create_info, g_Allocator, &g_Device);
-        check_vk_result(err);
+        checkVkResult(err);
         vkGetDeviceQueue(g_Device, g_QueueFamily, 0, &g_Queue);
     }
 
     // Create Descriptor Pool
-    // If you wish to load e.g. additional textures you may need to alter pools sizes and maxSets.
     {
         VkDescriptorPoolSize pool_sizes[] =
         {
@@ -175,7 +182,7 @@ static void SetupVulkan(ImVector<const char*> instance_extensions)
         pool_info.poolSizeCount = (uint32_t)IM_COUNTOF(pool_sizes);
         pool_info.pPoolSizes = pool_sizes;
         err = vkCreateDescriptorPool(g_Device, &pool_info, g_Allocator, &g_DescriptorPool);
-        check_vk_result(err);
+        checkVkResult(err);
     }
 }
 
@@ -242,24 +249,24 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data)
     if (err == VK_ERROR_OUT_OF_DATE_KHR)
         return;
     if (err != VK_SUBOPTIMAL_KHR)
-        check_vk_result(err);
+        checkVkResult(err);
 
     ImGui_ImplVulkanH_Frame* fd = &wd->Frames[wd->FrameIndex];
     {
         err = vkWaitForFences(g_Device, 1, &fd->Fence, VK_TRUE, UINT64_MAX);    // wait indefinitely instead of periodically checking
-        check_vk_result(err);
+        checkVkResult(err);
 
         err = vkResetFences(g_Device, 1, &fd->Fence);
-        check_vk_result(err);
+        checkVkResult(err);
     }
     {
         err = vkResetCommandPool(g_Device, fd->CommandPool, 0);
-        check_vk_result(err);
+        checkVkResult(err);
         VkCommandBufferBeginInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         info.flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         err = vkBeginCommandBuffer(fd->CommandBuffer, &info);
-        check_vk_result(err);
+        checkVkResult(err);
     }
     {
         VkRenderPassBeginInfo info = {};
@@ -291,9 +298,13 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data)
         info.pSignalSemaphores = &render_complete_semaphore;
 
         err = vkEndCommandBuffer(fd->CommandBuffer);
-        check_vk_result(err);
-        err = vkQueueSubmit(g_Queue, 1, &info, fd->Fence);
-        check_vk_result(err);
+        checkVkResult(err);
+        {
+            std::scoped_lock lock(g_QueueMutex);
+            err = vkQueueSubmit(g_Queue, 1, &info, fd->Fence);
+            checkVkResult(err);
+        }
+        checkVkResult(err);
     }
 }
 
@@ -309,20 +320,22 @@ static void FramePresent(ImGui_ImplVulkanH_Window* wd)
     info.swapchainCount = 1;
     info.pSwapchains = &wd->Swapchain;
     info.pImageIndices = &wd->FrameIndex;
-    VkResult err = vkQueuePresentKHR(g_Queue, &info);
-    if (err == VK_ERROR_OUT_OF_DATE_KHR || err == VK_SUBOPTIMAL_KHR)
-        g_SwapChainRebuild = true;
-    if (err == VK_ERROR_OUT_OF_DATE_KHR)
-        return;
-    if (err != VK_SUBOPTIMAL_KHR)
-        check_vk_result(err);
+    {
+        std::scoped_lock lock(g_QueueMutex);
+        VkResult err = vkQueuePresentKHR(g_Queue, &info);
+        if (err == VK_ERROR_OUT_OF_DATE_KHR || err == VK_SUBOPTIMAL_KHR)
+            g_SwapChainRebuild = true;
+        if (err == VK_ERROR_OUT_OF_DATE_KHR)
+            return;
+        if (err != VK_SUBOPTIMAL_KHR)
+            checkVkResult(err);
+    }
     wd->SemaphoreIndex = (wd->SemaphoreIndex + 1) % wd->SemaphoreCount; // Now we can use the next set of semaphores
 }
 
 // Main code
-int main(int, char**)
-{
-    glfwSetErrorCallback(glfw_error_callback);
+int main(int, char**) {
+    glfwSetErrorCallback(glfwErrorCallback);
     if (!glfwInit())
         return 1;
 
@@ -330,8 +343,7 @@ int main(int, char**)
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     float main_scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor()); // Valid on GLFW 3.3+ only
     GLFWwindow* window = glfwCreateWindow((int)(1280 * main_scale), (int)(800 * main_scale), "Dear ImGui GLFW+Vulkan example", nullptr, nullptr);
-    if (!glfwVulkanSupported())
-    {
+    if (!glfwVulkanSupported()) {
         printf("GLFW: Vulkan Not Supported\n");
         return 1;
     }
@@ -341,12 +353,12 @@ int main(int, char**)
     const char** glfw_extensions = glfwGetRequiredInstanceExtensions(&extensions_count);
     for (uint32_t i = 0; i < extensions_count; i++)
         extensions.push_back(glfw_extensions[i]);
-    SetupVulkan(extensions);
+    setupVulkan(extensions);
 
     // Create Window Surface
     VkSurfaceKHR surface;
     VkResult err = glfwCreateWindowSurface(g_Instance, window, g_Allocator, &surface);
-    check_vk_result(err);
+    checkVkResult(err);
 
     // Create Framebuffers
     int w, h;
@@ -365,9 +377,7 @@ int main(int, char**)
     //io.ConfigViewportsNoAutoMerge = true;
     //io.ConfigViewportsNoTaskBarIcon = true;
 
-    // Setup Dear ImGui style
-    ImGui::StyleColorsDark();
-    //ImGui::StyleColorsLight();
+    Veil::applyTheme();
 
     // Setup scaling
     ImGuiStyle& style = ImGui::GetStyle();
@@ -386,7 +396,7 @@ int main(int, char**)
     // Setup Platform/Renderer backends
     ImGui_ImplGlfw_InitForVulkan(window, true);
     ImGui_ImplVulkan_InitInfo init_info = {};
-    //init_info.ApiVersion = VK_API_VERSION_1_3;              // Pass in your value of VkApplicationInfo::apiVersion, otherwise will default to header version.
+    //init_info.ApiVersion = VK_API_VERSION_1_3;
     init_info.Instance = g_Instance;
     init_info.PhysicalDevice = g_PhysicalDevice;
     init_info.Device = g_Device;
@@ -400,54 +410,43 @@ int main(int, char**)
     init_info.PipelineInfoMain.RenderPass = wd->RenderPass;
     init_info.PipelineInfoMain.Subpass = 0;
     init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-    init_info.CheckVkResultFn = check_vk_result;
+    init_info.CheckVkResultFn = checkVkResult;
     ImGui_ImplVulkan_Init(&init_info);
 
-    // Load Fonts
-    // - If fonts are not explicitly loaded, Dear ImGui will select an embedded font: either AddFontDefaultVector() or AddFontDefaultBitmap().
-    //   This selection is based on (style.FontSizeBase * style.FontScaleMain * style.FontScaleDpi) reaching a small threshold.
-    // - You can load multiple fonts and use ImGui::PushFont()/PopFont() to select them.
-    // - If a file cannot be loaded, AddFont functions will return a nullptr. Please handle those errors in your code (e.g. use an assertion, display an error and quit).
-    // - Read 'docs/FONTS.md' for more instructions and details.
-    // - Use '#define IMGUI_ENABLE_FREETYPE' in your imconfig file to use FreeType for higher quality font rendering.
-    // - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
-    //style.FontSizeBase = 20.0f;
-    //io.Fonts->AddFontDefaultVector();
-    //io.Fonts->AddFontDefaultBitmap();
-    //io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf");
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf");
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf");
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf");
-    //ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf");
-    //IM_ASSERT(font != nullptr);
+    style.FontSizeBase = 20.0f;
+    ImFont* font = io.Fonts->AddFontFromFileTTF("fonts/JetBrainsMono-Medium.ttf");
+    IM_ASSERT(font != nullptr);
 
-    // Our state
-    bool show_demo_window = true;
-    bool show_another_window = false;
+    vulkanDevice.init(g_PhysicalDevice);
+
+    Veil::g_VeilConfig.load("veil_config.json");
+    
+    Veil::g_GpuDatabase.load("gpu_database.json");
+    
+    int hostIndex = Veil::g_GpuDatabase.findByName(vulkanDevice.getGpuName());
+    if (hostIndex == -1) {
+        fprintf(stderr, "Could not find host GPU '%s' in database\n", vulkanDevice.getGpuName().c_str());
+        hostIndex = 0;
+    }
+    
+    veilUI.init(hostIndex, &vulkanDevice, &Veil::g_GpuDatabase, Veil::g_GpuDatabase.getWeakerGpuIndices(hostIndex), &benchmark);
+    benchmark.init(g_Device, g_PhysicalDevice, g_Queue, g_QueueFamily, &g_QueueMutex);
+    
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
     // Main loop
-    while (!glfwWindowShouldClose(window))
-    {
-        // Poll and handle events (inputs, window resize, etc.)
-        // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your inputs.
-        // - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application, or clear/overwrite your copy of the mouse data.
-        // - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application, or clear/overwrite your copy of the keyboard data.
-        // Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
+    while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
-        // Resize swap chain?
         int fb_width, fb_height;
         glfwGetFramebufferSize(window, &fb_width, &fb_height);
-        if (fb_width > 0 && fb_height > 0 && (g_SwapChainRebuild || g_MainWindowData.Width != fb_width || g_MainWindowData.Height != fb_height))
-        {
+        if (fb_width > 0 && fb_height > 0 && (g_SwapChainRebuild || g_MainWindowData.Width != fb_width || g_MainWindowData.Height != fb_height)) {
             ImGui_ImplVulkan_SetMinImageCount(g_MinImageCount);
             ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, wd, g_QueueFamily, g_Allocator, fb_width, fb_height, g_MinImageCount, 0);
             g_MainWindowData.FrameIndex = 0;
             g_SwapChainRebuild = false;
         }
-        if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0)
-        {
+        if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0) {
             ImGui_ImplGlfw_Sleep(10);
             continue;
         }
@@ -457,42 +456,7 @@ int main(int, char**)
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
-        if (show_demo_window)
-            ImGui::ShowDemoWindow(&show_demo_window);
-
-        // 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
-        {
-            static float f = 0.0f;
-            static int counter = 0;
-
-            ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
-
-            ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
-            ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
-            ImGui::Checkbox("Another Window", &show_another_window);
-
-            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
-
-            if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
-                counter++;
-            ImGui::SameLine();
-            ImGui::Text("counter = %d", counter);
-
-            ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-            ImGui::End();
-        }
-
-        // 3. Show another simple window.
-        if (show_another_window)
-        {
-            ImGui::Begin("Another Window", &show_another_window);   // Pass a pointer to our bool variable (the window will have a closing button that will clear the bool when clicked)
-            ImGui::Text("Hello from another window!");
-            if (ImGui::Button("Close Me"))
-                show_another_window = false;
-            ImGui::End();
-        }
+        veilUI.render();
 
         // Rendering
         ImGui::Render();
@@ -502,24 +466,25 @@ int main(int, char**)
         wd->ClearValue.color.float32[1] = clear_color.y * clear_color.w;
         wd->ClearValue.color.float32[2] = clear_color.z * clear_color.w;
         wd->ClearValue.color.float32[3] = clear_color.w;
-        if (!main_is_minimized)
+        if (!main_is_minimized) {
             FrameRender(wd, main_draw_data);
+        }
 
         // Update and Render additional Platform Windows
-        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-        {
+        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
             ImGui::UpdatePlatformWindows();
             ImGui::RenderPlatformWindowsDefault();
         }
 
         // Present Main Platform Window
-        if (!main_is_minimized)
+        if (!main_is_minimized) {
             FramePresent(wd);
+        }
     }
 
     // Cleanup
     err = vkDeviceWaitIdle(g_Device);
-    check_vk_result(err);
+    checkVkResult(err);
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
