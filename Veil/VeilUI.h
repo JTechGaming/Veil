@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "Benchmark.h"
 #include "GpuDatabase.hpp"
+#include "ThrottleEngine.h"
 #include "VulkanDevice.h"
 
 namespace Veil {
@@ -8,7 +9,7 @@ namespace Veil {
     
     class VeilUI {
     public:
-        void init(int hostIndex, VulkanDevice* device, GpuDatabase* database, const std::vector<int>& weakerGpuIndices, Benchmark* benchmark);
+        void init(int hostIndex, VulkanDevice* device, GpuDatabase* database, const std::vector<int>& weakerGpuIndices, Benchmark* benchmark, ThrottleEngine* throttleEngine);
         void render();
         void renderFirstLaunch();
 
@@ -19,6 +20,8 @@ namespace Veil {
         VulkanDevice* m_device = nullptr;
         GpuDatabase* m_database = nullptr;
         Benchmark* m_benchmark = nullptr;
+        ThrottleEngine* m_throttleEngine = nullptr;
+        float m_throttleBaselineScore = 0.0f;
         std::vector<int> m_weakerGpuIndices;
 
         void renderCalibrate();
@@ -35,6 +38,10 @@ namespace Veil {
         float m_hostScore = 0.0f;
         float m_targetScore = 0.0f;
         float m_currentThrottledScore = 0.0f;
+        
+        float m_vramClampGb = 1.0f;
+        bool m_vramOnlyMode = false;
+        bool m_vramClamped = false;
         
         float m_conversionFactor = 0.0f;
         

@@ -8,18 +8,19 @@
 
 namespace Veil {
     void VeilUI::init(int hostIndex, VulkanDevice* device, GpuDatabase* database,
-                      const std::vector<int>& weakerGpuIndices, Benchmark* benchmark) {
+                      const std::vector<int>& weakerGpuIndices, Benchmark* benchmark, ThrottleEngine* throttleEngine) {
         m_hostIndex = hostIndex;
         m_device = device;
         m_database = database;
         m_weakerGpuIndices = weakerGpuIndices;
         m_benchmark = benchmark;
+        m_throttleEngine = throttleEngine;
         
         m_currentStep = g_VeilConfig.getData().firstLaunchComplete ? Step::Calibrate : Step::FirstLaunch;
     }
 
     void VeilUI::render() {
-        // poll benchmark state each frame
+        // poll benchmark and throttle state each frame
         if (m_calibrating) {
             m_calibrationProgress = m_benchmark->getProgress();
             if (m_benchmark->getComplete()) {
@@ -30,6 +31,9 @@ namespace Veil {
                 float conversionFactor = m_hostScore / m_database->get(m_hostIndex).blenderScore;
                 m_conversionFactor = conversionFactor;
             }
+        }
+        if (m_isEmulating) {
+            m_currentThrottledScore = m_throttleEngine->getCurrentScore();
         }
 
         ImGui::SetNextWindowPos(ImGui::GetMainViewport()->Pos);
@@ -260,7 +264,7 @@ namespace Veil {
         ImGui::BeginChild("##gpulistcard", ImVec2(cardWidth, cardY), true);
 
         ImGui::Text("Select GPU");
-        if (ImGui::BeginListBox("##gpuselect", ImVec2(cardWidth * 0.9f, cardY * 0.9f))) {
+        if (ImGui::BeginListBox("##gpuselect", ImVec2(cardWidth * 0.98f, cardY * 0.95f))) {
             for (int index : m_weakerGpuIndices) {
                 if (strlen(m_searchBuffer) > 0) {
                     std::string query = m_searchBuffer;
@@ -301,10 +305,22 @@ namespace Veil {
         if (ImGui::Button("Next >", ImVec2(buttonWidth, buttonHeight)))
             if (m_selectedTargetIndex != -1) {
                 m_targetScore = m_database->get(m_selectedTargetIndex).blenderScore * m_conversionFactor;
-                m_currentThrottledScore = m_hostScore; //temp
+                m_currentThrottledScore = m_hostScore;
+                m_targetScore = m_database->get(m_selectedTargetIndex).blenderScore * m_conversionFactor;
+                if (m_database->get(m_selectedTargetIndex).vram.has_value())
+                    m_vramClampGb = std::max(1.0f, m_database->get(m_selectedTargetIndex).vram.value());
                 m_currentStep = Step::Emulate;
             }
         if (m_selectedTargetIndex == -1) ImGui::EndDisabled();
+        
+        ImGui::Spacing();
+        ImGui::SetCursorPosX(centerX - buttonWidth);
+        if (ImGui::Button("Skip - VRAM only", ImVec2(buttonWidth * 2, buttonHeight))) {
+            m_vramOnlyMode = true;
+            m_selectedTargetIndex = -1;
+            m_targetScore = 0.0f;
+            m_currentStep = Step::Emulate;
+        }
     }
 
     void VeilUI::renderEmulate() {
@@ -367,38 +383,86 @@ namespace Veil {
 
         // throttle card
         ImGui::SetCursorPosX(cardX);
-        ImGui::BeginChild("##throttlecard", ImVec2(cardWidth, 190), true);
+        ImGui::BeginChild("##throttlecard", ImVec2(cardWidth, 400), true);
         ImGui::TextDisabled("THROTTLE");
         ImGui::Spacing();
         ImGui::Spacing();
         ImGui::Spacing();
-        
-        float percentage = (m_hostScore > 0.0f) ? (m_currentThrottledScore / m_hostScore) : 0.0f;
-        ImGui::ProgressBar(percentage, ImVec2(-1, 40));
 
-        ImVec2 posMin = ImGui::GetItemRectMin();
-        ImVec2 posMax = ImGui::GetItemRectMax();
+        if (!m_vramOnlyMode) {
+            float percentage = (m_throttleBaselineScore > 0.0f) ? (m_currentThrottledScore / m_throttleBaselineScore) : 0.0f;
+            ImGui::ProgressBar(percentage, ImVec2(-1, 40));
 
-        // target line
-        if (m_hostScore > 0.0f) {
-            float lineX = posMin.x + (posMax.x - posMin.x) * (m_targetScore / m_hostScore);
-            ImGui::GetWindowDrawList()->AddLine(
-                ImVec2(lineX, posMin.y),
-                ImVec2(lineX, posMax.y),
-                IM_COL32(100, 255, 100, 255), 2.0f
-            );
-            // target label above line
-            std::string targetName = m_database->get(m_selectedTargetIndex).name;
-            ImVec2 targetSize = ImGui::CalcTextSize(targetName.c_str());
-            ImGui::GetWindowDrawList()->AddText(
-                ImVec2(lineX - targetSize.x * 0.5f, posMin.y - targetSize.y - 2),
-                IM_COL32(100, 255, 100, 255),
-                targetName.c_str()
-            );
+            ImVec2 posMin = ImGui::GetItemRectMin();
+            ImVec2 posMax = ImGui::GetItemRectMax();
+
+            // target line
+            if (m_hostScore > 0.0f) {
+                float lineX = posMin.x + (posMax.x - posMin.x) * (m_targetScore / m_hostScore);
+                ImGui::GetWindowDrawList()->AddLine(
+                    ImVec2(lineX, posMin.y),
+                    ImVec2(lineX, posMax.y),
+                    IM_COL32(100, 255, 100, 255), 2.0f
+                );
+                // target label above line
+                std::string targetName = m_database->get(m_selectedTargetIndex).name;
+                ImVec2 targetSize = ImGui::CalcTextSize(targetName.c_str());
+                ImGui::GetWindowDrawList()->AddText(
+                    ImVec2(lineX - targetSize.x * 0.5f, posMin.y - targetSize.y - 2),
+                    IM_COL32(100, 255, 100, 255),
+                    targetName.c_str()
+                );
+            }
+
+            ImGui::SetCursorScreenPos(ImVec2(posMin.x, posMax.y + ImGui::GetStyle().ItemSpacing.y));
+            ImGui::TextDisabled("%.4f  /  %.4f", m_currentThrottledScore, m_hostScore);
         }
+        
+        ImGui::Spacing();
+        ImGui::Spacing();
+        ImGui::Spacing();
+        ImGui::Spacing();
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::Spacing();
+        ImGui::Spacing();
+        ImGui::Spacing();
+        ImGui::Spacing();
+        ImGui::TextDisabled("VRAM CLAMP");
+        ImGui::Spacing();
 
-        ImGui::SetCursorScreenPos(ImVec2(posMin.x, posMax.y + ImGui::GetStyle().ItemSpacing.y));
-        ImGui::TextDisabled("%.4f  /  %.4f", m_currentThrottledScore, m_hostScore);
+        float hostVramGb = m_device->getVramBytes() / 1e9f;
+        float minVram = 1.0f; // red zone floor
+        float maxVram = hostVramGb - 0.1f;
+
+        // draw the progress bar background with red zone overlay
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.15f, 0.08f, 0.08f, 1.0f));
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::SliderFloat("##vramslider", &m_vramClampGb, minVram, maxVram, "%.1f GB")) {
+            m_vramClampGb = std::max(m_vramClampGb, minVram);
+            if (m_isEmulating)
+                m_throttleEngine->clampVram(m_device->getVramBytes(), m_vramClampGb);
+        }
+        ImGui::PopStyleColor();
+
+        // red zone label
+        float sliderWidth = ImGui::GetItemRectMax().x - ImGui::GetItemRectMin().x;
+        float redZoneWidth = sliderWidth * (minVram / hostVramGb);
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            ImGui::GetItemRectMin(),
+            ImVec2(ImGui::GetItemRectMin().x + redZoneWidth, ImGui::GetItemRectMax().y),
+            IM_COL32(120, 30, 30, 120)
+        );
+        ImGui::GetWindowDrawList()->AddText(
+            ImVec2(ImGui::GetItemRectMin().x + 4, ImGui::GetItemRectMin().y + 2),
+            IM_COL32(255, 80, 80, 200),
+            "< 1GB min"
+        );
+
+        if (!m_vramClamped && m_isEmulating)
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Warning: VRAM clamp failed");
+        
         ImGui::EndChild();
 
         ImGui::Spacing();
@@ -425,6 +489,12 @@ namespace Veil {
         if (ImGui::Button(m_isEmulating ? "Stop Emulating" : "Start Emulating",
                           ImVec2(buttonWidth, 45))) {
             m_isEmulating = !m_isEmulating;
+            if (m_isEmulating) {
+                m_throttleBaselineScore = m_benchmark->measureScore(); // fresh baseline
+                m_throttleEngine->start(m_targetScore * (m_throttleBaselineScore / m_hostScore));
+            } else {
+                m_throttleEngine->stop();
+            }
         }
         ImGui::PopStyleColor(2);
     }

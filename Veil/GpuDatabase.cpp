@@ -54,7 +54,7 @@ namespace Veil {
 
     const GpuEntry& GpuDatabase::get(int index) const {
         if (index < 0 || index >= static_cast<int>(m_loadedGpus.size())) {
-            throw std::out_of_range("index out of range for m_loadedGpus");
+            return GpuEntry{};
         }
         return m_loadedGpus[index];
     }

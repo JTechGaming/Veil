@@ -1017,6 +1017,20 @@ namespace Veil {
 
         return drawCallsPerMs;
     }
+    
+    float Benchmark::measureScore() {
+        float fillRate  = runFillRatePass();
+        float bandwidth = runBandwidthPass();
+        float compute   = runComputePass();
+        float drawCalls = runDrawCallOverheadPass();
+
+        float normFillRate  = fillRate  / 1000000.0f;
+        float normBandwidth = bandwidth / 1000.0f;
+        float normCompute   = compute   / 100.0f;
+        float normDrawCalls = drawCalls / 1000.0f;
+
+        return (normFillRate + normBandwidth + normCompute + normDrawCalls) / 4.0f;
+    }
 
     uint32_t Benchmark::findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) {
         VkPhysicalDeviceMemoryProperties memProps;

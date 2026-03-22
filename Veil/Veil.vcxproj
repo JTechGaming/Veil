@@ -552,6 +552,7 @@
       <AdditionalIncludeDirectories>C:\VulkanSDK\1.4.309.0\Include</AdditionalIncludeDirectories>
       <LinkCompiled>true</LinkCompiled>
     </ClCompile>
+    <ClCompile Include="ThrottleEngine.cpp" />
     <ClCompile Include="Veil.cpp" />
     <ClCompile Include="VeilUI.cpp" />
     <ClCompile Include="VulkanDevice.cpp" />
@@ -570,6 +571,7 @@
     <ClInclude Include="thirdparty\imgui\imstb_rectpack.h" />
     <ClInclude Include="thirdparty\imgui\imstb_textedit.h" />
     <ClInclude Include="thirdparty\imgui\imstb_truetype.h" />
+    <ClInclude Include="ThrottleEngine.h" />
     <ClInclude Include="VeilConfig.h" />
     <ClCompile Include="VeilConfig.cpp" />
     <ClInclude Include="VeilTheme.h" />
@@ -590,6 +592,7 @@
     <Content Include="shaders\fillrate.vert" />
     <Content Include="shaders\fillrate_frag.spv" />
     <Content Include="shaders\fillrate_vert.spv" />
+    <Content Include="shaders\stall.comp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

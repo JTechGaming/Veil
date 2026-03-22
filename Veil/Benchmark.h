@@ -34,6 +34,9 @@ namespace Veil {
             return m_running.load();
         }
 
+        float measureScore();
+        uint32_t findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties);
+
     private:
         VkDevice m_device;
         VkPhysicalDevice m_physicalDevice;
@@ -52,11 +55,10 @@ namespace Veil {
         std::atomic<float> m_score{0.0f};
         std::atomic<bool> m_complete{false};
         std::atomic<bool> m_running{false};
-
+        
         float runFillRatePass();
         float runBandwidthPass();
         float runComputePass();
         float runDrawCallOverheadPass();
-        uint32_t findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties);
     };
 }
